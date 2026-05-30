@@ -1,6 +1,9 @@
-.terraform/*
-
-*.tfstate
-*.tfstate.*
-
+cat > .gitignore << 'EOF'
+*.pem
 *.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+ansible-master-key.pem
+EOF
