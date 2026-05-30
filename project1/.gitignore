@@ -1,0 +1,7 @@
+# add this to your .gitignore
+*.pem
+*.pub
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+terraform.tfvars
