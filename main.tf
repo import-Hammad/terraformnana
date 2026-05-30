@@ -1,6 +1,5 @@
 provider "aws" {
     region = "us-east-1"
-    
 }
 
 variable "subnet_cidr_block" {
@@ -11,44 +10,122 @@ variable "vpc_cidr_block" {
     description = "CIDR block for the VPC"
 }
 
-variable "environment" {
-    description = "Environment for the resources"
+variable "my_ip" {
+    description = "Your IP address in CIDR notation"
 }
 
-resource "aws_vpc" "development-vpc" {
+variable "mypublic_key" {
+    description = "Your SSH public key"
+}
+
+variable "env_prefix" {}
+variable "ami" {}
+variable "instance_type" {}
+variable "private_key_location" {}
+
+resource "aws_vpc" "myapp-vpc" {
     cidr_block = var.vpc_cidr_block
     tags = {
-        Name = "development"
+        Name = "${var.env_prefix}-vpc"
     }
 }
 
-resource "aws_subnet" "dev-subnet-1" {
-    vpc_id            = aws_vpc.development-vpc.id
+resource "aws_subnet" "myapp-subnet-1" {
+    vpc_id            = aws_vpc.myapp-vpc.id
     cidr_block        = var.subnet_cidr_block
     availability_zone = "us-east-1a"
     tags = {
-        Name    = "subnet-1-dev"
-        vpc_env = "dev"
+        Name = "${var.env_prefix}-subnet-1"
     }
 }
 
-data "aws_vpc" "existing-vpc" {
-    default = true
-}
-
-resource "aws_subnet" "dev-subnet-2" {
-    vpc_id            = data.aws_vpc.existing-vpc.id
-    cidr_block        = "172.31.96.0/20"   # ✅ fixed
-    availability_zone = "us-east-1c"        # ✅ fixed
+resource "aws_internet_gateway" "myapp-igw" {
+    vpc_id = aws_vpc.myapp-vpc.id
     tags = {
-        Name = "subnet-2-dev"
+        Name = "${var.env_prefix}-igw"
     }
 }
 
-output "dev-vpc-id" {
-    value = aws_vpc.development-vpc.id
+resource "aws_route_table" "myapp-route-table" {
+    vpc_id = aws_vpc.myapp-vpc.id
+    route {
+        cidr_block = "0.0.0.0/0"
+        gateway_id = aws_internet_gateway.myapp-igw.id
+    }
+    tags = {
+        Name = "${var.env_prefix}-rtb"
+    }
 }
 
-output "dev-subnet-id" {
-    value = aws_subnet.dev-subnet-1.id
+resource "aws_route_table_association" "a-rtb-subnet" {
+    subnet_id      = aws_subnet.myapp-subnet-1.id
+    route_table_id = aws_route_table.myapp-route-table.id
+}
+
+resource "aws_security_group" "myapp-sg" {
+    name   = "myapp-sg"
+    vpc_id = aws_vpc.myapp-vpc.id
+
+    ingress {
+        from_port   = 22
+        to_port     = 22
+        protocol    = "tcp"
+        cidr_blocks = [var.my_ip]
+    }
+
+    ingress {
+        from_port   = 8080
+        to_port     = 8080
+        protocol    = "tcp"
+        cidr_blocks = ["0.0.0.0/0"]
+    }
+
+    egress {
+        from_port       = 0
+        to_port         = 0
+        protocol        = "-1"
+        cidr_blocks     = ["0.0.0.0/0"]
+        prefix_list_ids = []
+    }
+
+    tags = {
+        Name = "${var.env_prefix}-sg"
+    }
+}
+
+resource "aws_key_pair" "ssh-key" {
+    key_name   = "server-key"
+    public_key = var.mypublic_key
+}
+
+resource "aws_instance" "myapp-server" {
+    ami                         = var.ami
+    instance_type               = var.instance_type
+    subnet_id                   = aws_subnet.myapp-subnet-1.id
+    vpc_security_group_ids      = [aws_security_group.myapp-sg.id]
+    availability_zone           = "us-east-1a"
+    associate_public_ip_address = true
+    key_name                    = aws_key_pair.ssh-key.key_name
+
+    user_data = <<-EOF
+                #!/bin/bash
+                yum update -y
+                yum install -y docker
+                systemctl start docker
+                systemctl enable docker
+                usermod -aG docker ec2-user
+                docker run -d -p 8080:80 nginx
+                EOF
+
+
+    user_data_replace_on_change = true
+
+
+    tags = {
+        Name = "${var.env_prefix}-server"
+    }
+}
+
+output "ec2_public_ip" {
+    value = aws_instance.myapp-server.public_ip
 }
